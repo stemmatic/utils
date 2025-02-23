@@ -15,6 +15,9 @@
 
 #define RATE(a, t) ((t) != 0 ? (double) (a)/(t) : 0.0)
 
+#define STATES "?0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-"
+#define MAXSTATES (sizeof(STATES) - 1)
+
 // Witnesses: a Structure of Arrays (SoA)
 
 typedef struct witnesses {
@@ -28,6 +31,9 @@ typedef struct witnesses {
 	char *maxrdgs;					// [nSites] Maximum reading
 
 	char *majRdgs;					// [nSites] Majority readings
+
+	int A;							// -1 .. nLeafs :: Override archetype
+	int B;							// -1 .. nLeafs :: Override Byzantine
 } Wits;
 
 extern Wits *
@@ -63,6 +69,8 @@ extern Wits *
 	// Set up majRdgs[]
 	NEWMEM(wt->majRdgs, nSites);
 	ASET(wt->majRdgs, '0', nSites);
+
+	wt->A = wt->B = ERR;
 
 	return wt;
 }
@@ -136,8 +144,8 @@ double
 		char msRdg = wt->rdgs[ms][rr];
 		char llRdg = wt->rdgs[ll][rr];
 
-		const char rdgA = '0';
-		const char rdgB = wt->majRdgs[rr];
+		const char rdgA = (wt->A >= 0 && wt->A < wt->nLeafs) ? wt->rdgs[wt->A][rr] : '0';
+		const char rdgB = (wt->B >= 0 && wt->B < wt->nLeafs) ? wt->rdgs[wt->B][rr] : wt->majRdgs[rr];
 
 		// Skip lacunae
 		if (msRdg == '?' || llRdg == '?')
@@ -180,6 +188,9 @@ int
 	wtFind(Wits *wt, const char *msName)
 {
 	int ll;
+
+	if (!msName)
+		return ERR;
 
 	for (ll = 0; ll < wt->nLeafs; ll++) {
 		if (strcmp(msName, wt->names[ll]) == 0)
@@ -279,6 +290,46 @@ double
 	return pop;
 }
 
+// Calculate Waltz's relationship number, between ms and ll
+// RN = SUM @r: # of mss at site -1 / size of set agreeing with
+double
+	wtRN(Wits *wt, int ms, int ll)
+{
+	double rn = 0.0;
+	int nRdgs = 0;
+
+	for (int rr = 0; rr < wt->nSites; rr++) {
+		char msRdg = wt->rdgs[ms][rr];
+		char llRdg = wt->rdgs[ll][rr];
+
+		// Skip lacunae
+		if (msRdg == '?' || llRdg == '?')
+			continue;
+
+		nRdgs++;
+
+		// If they do not agree, rn is 0.0
+		if (msRdg != llRdg)
+			continue;
+
+		// Count all ms attested at site and those which agree
+		int nAll = 0;
+		int nAgr = 0;
+		for (int mm = 0; mm < wt->nLeafs; mm++) {
+			char mmRdg = wt->rdgs[mm][rr];
+
+			if (msRdg == '?')
+				continue;
+			nAll++;
+			if (mmRdg == msRdg)
+				nAgr++;
+		}
+		rn += (nAll - 1.0) / nAgr;
+	}
+
+	return rn / nRdgs;
+}
+
 int
 	main(int argc, const char *argv[])
 {
@@ -297,6 +348,9 @@ int
 		return ERR;
 	}
 	Wits *wt = wtScan(fpMss);
+
+	wt->A = wtFind(wt, getenv("A"));
+	wt->B = wtFind(wt, getenv("B"));
 
 	const char *msName = argv[2];
 	const int ms = wtFind(wt, msName);
@@ -357,12 +411,14 @@ int
 	struct st results[1];
 	for (ll = 0; ll < wt->nLeafs; ll++) {
 		double rate = wtSim(wt, ms, ll, results);
-		printf("%-10s %-10s  |O: %0.03f %5u %5u  |A: %0.03f %5u %5u  |AB: %0.03f %5u %5u  |B: %0.03f %5u %5u  ||\n",
+		double rn   = wtRN(wt, ms, ll);
+		printf("%-10s %-10s  |O: %0.03f %5u %5u  |A: %0.03f %5u %5u  |AB: %0.03f %5u %5u  |B: %0.03f %5u %5u  || %g\n",
 			msName, wt->names[ll], 
 			RATE(results->agrO,  results->totO),  results->agrO,  results->totO,
 			RATE(results->agrA,  results->totA),  results->agrA,  results->totA,
 			RATE(results->agrAB, results->totAB), results->agrAB, results->totAB,
-			RATE(results->agrB,  results->totB),  results->agrB,  results->totB);
+			RATE(results->agrB,  results->totB),  results->agrB,  results->totB,
+			rn);
 	}
 	return OK;
 }
