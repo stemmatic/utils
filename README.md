@@ -1,6 +1,7 @@
-# utils - Utilites for working with stemma
-In this respository:
+# utils - Utilities for working with stemma outputs and inputs
+In this repository:
 * **stats**: Compute various statistics for set of collated manuscripts.
+* **chomp**: trim output from stemma runs
 
 # stats: Textual Variation Analysis Tool
 ## Description
@@ -90,4 +91,53 @@ Output might look like:
 * **Archetype and Byzantine Witnesses**: Default to calculated values unless overridden by environment variables A and B.
 ## License
 This project is licensed under the MIT License.
-This README provides a comprehensive overview of the `stats` tool, including its purpose, usage instructions, and examples, making it accessible to users interested in textual variation analysis.
+
+# Chomp
+Chomp is a C program that reads from standard input, processes the input by handling carriage return (`\r`) characters to overwrite the current line buffer, and prints the final state of the line when a newline (`\n`) is encountered. This behavior makes it particularly useful for cleaning up output from programs that use `\r` to update the same line, such as progress indicators, while ensuring consistent line printing for inputs with Unix-style (`\n`) or Windows-style (`\r\n`) line endings.
+## Usage
+To compile the program, use a C compiler like `gcc`:
+```
+bash
+gcc -o chomp chomp.c
+```
+To run the program, pipe input to it or redirect from a file:
+```
+bash
+./chomp < input.txt
+```
+or
+```
+bash
+cat input.txt | ./chomp
+```
+## Example
+Consider a file `input.txt` with the following content (where `\r` represents a carriage return and `\n` a newline):
+```
+Progress: 10%\rProgress: 20%\rProgress: 100%\nHello\r\nWorld\n
+```
+Running `./chomp < input.txt` will produce the following output:
+```
+Progress: 100%
+Hello
+World
+```
+## Explanation
+* For `Progress: 10%\rProgress: 20%\rProgress: 100%\n`:
+** Each `\r` overwrites the buffer with the subsequent text.
+** When `\n` is encountered, it prints the final state, `Progress: 100%`.
+* For `Hello\r\n`, the `\r` prepares the buffer, and `\n` prints `Hello`.
+* For `World\n`, the `\n` triggers printing of World.
+## How It Works
+The program:
+* Uses a static 256-character buffer (`linebuf`) to store input characters.
+* Reads characters from standard input using `getchar()` until `EOF` is encountered.
+* Processes each character as follows:
+  * **Newline (`\n`)**: Prints the current buffer content using `puts()` (which adds a newline) and then resets the buffer.
+  * **Carriage return (`\r`)**: Null-terminates the buffer and resets the pointer to the start, effectively allowing subsequent characters to overwrite the buffer.
+  * **Other characters**: Adds them to the buffer, advancing the pointer.
+Due to the lack of a `break` statement after the `\n` case in the switch, when `\n` is encountered, it executes both the print operation and the buffer reset (via the `\r` case). For `\r\n` sequences, the `\r` resets the buffer, and the `\n` prints the prior content, effectively ignoring the `\r` in the output.
+## Limitations
+* **Buffer Size**: Assumes lines are shorter than 256 characters. Longer lines may cause buffer overflow and undefined behavior.
+* **Output Trigger**: Only prints when \n is encountered. Lines terminated solely by `\r` or partial lines without a trailing `\n` (e.g., at `EOF`) will not be printed.
+* **Specific Use Case**: Optimized for `\n` or `\r\n` line endings; it does not fully support old Mac-style `\r`-only line endings.
+This program is a simple yet effective tool for processing text streams where carriage returns need to be handled or removed, ensuring output is printed cleanly on newlines.
