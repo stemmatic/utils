@@ -85,6 +85,12 @@ Output might look like:
 1 1 phi:  0.5000  WitA WitB [! !]
 2 2 phi:  0.0000  WitA WitB [!WitC !]
 ```
+### Print agreements between two witnesses 
+* `./stats mss.tx -O witA witB` for overall agreements
+* `./stats mss.tx -A witA witB` for non-Archetypal agreements
+* `./stats mss.tx -B witA witB` for non-Byzantine (majority) agreements
+* `./stats mss.tx -AB witA witB` for non-Archetypal, non-Byzantine agreements.
+These options assume that a file `SOLN.VARS` is present in the directory or redirected in.
 ## Notes
 * **Readings**: Valid characters are from the set `?0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-`.
 * **Lacunae**: Missing readings are represented by ? and are excluded from calculations.
