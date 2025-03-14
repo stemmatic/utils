@@ -28,6 +28,7 @@ Wit5 0123012301
 * **No option**: If a manuscript name is provided, the program calculates and prints similarity statistics with all other manuscripts. This includes rates and counts for different types of agreements (Overall, Type-A, Type-AB, Type-B) and the Relationship Number (RN).
 * `-med`: Calculates and prints the sum of distances for each witness, useful for identifying medoids (central witnesses in terms of distance).
 * `-mcc`: Calculates and prints the Matthews Correlation Coefficient (MCC) for binary classification at each site and variant, based on a set of witnesses specified after the option.
+* `-O` or `-A` or `-B` or `-AB`: Prints the type of agreements between two witnesses.  These options assume that a file `SOLN.VARS` is present in the directory or redirected in.
 ## Environment Variables
 * `A=`: If set, specifies the index of the archetype witness (overrides default).
 * `B=`: If set, specifies the index of the Byzantine witness (overrides default).
@@ -90,7 +91,6 @@ Output might look like:
 * `./stats mss.tx -A witA witB` for non-Archetypal agreements
 * `./stats mss.tx -B witA witB` for non-Byzantine (majority) agreements
 * `./stats mss.tx -AB witA witB` for non-Archetypal, non-Byzantine agreements.
-These options assume that a file `SOLN.VARS` is present in the directory or redirected in.
 ## Notes
 * **Readings**: Valid characters are from the set `?0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-`.
 * **Lacunae**: Missing readings are represented by ? and are excluded from calculations.
