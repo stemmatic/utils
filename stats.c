@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <assert.h>
 #include <errno.h>
 #include <math.h>
@@ -25,12 +26,13 @@ typedef struct witnesses {
 	int nSites;						// Number of sites
 
 	char **names;                   // [nLeafs][strlen] Name aliases for nodes
-	char **rdgs;                    // [nLeafs][nSites] Original readings
+	unsigned char **rdgs;           // [nLeafs][nSites] Original readings
 
 	Flag *inset;					// [nLeafs] In selection set
-	char *maxrdgs;					// [nSites] Maximum reading
+	unsigned char *maxrdgs;         // [nSites] Maximum reading
 
-	char *majRdgs;					// [nSites] Majority readings
+	unsigned char *majRdgs;         // [nSites] Majority readings
+	unsigned char *agrSets;         // [nSites] Bit vector for agreement sets
 
 	int A;							// -1 .. nLeafs :: Override archetype
 	int B;							// -1 .. nLeafs :: Override Byzantine
@@ -69,6 +71,10 @@ extern Wits *
 	// Set up majRdgs[]
 	NEWMEM(wt->majRdgs, nSites);
 	ASET(wt->majRdgs, '0', nSites);
+
+	// Set up agrSets[]
+	NEWMEM(wt->agrSets, nSites);
+	ASET(wt->agrSets, 0, nSites);
 
 	wt->A = wt->B = ERR;
 
@@ -128,6 +134,11 @@ Wits *
 	return wt;
 }
 
+#define _O  0x01
+#define _A  0x02
+#define _B  0x04
+#define _AB 0x08
+
 struct st {
 	unsigned int agrO,  totO;		// type-O agreements;
 	unsigned int agrA,  totA;		// type-A agreements;
@@ -139,6 +150,8 @@ double
 	wtSim(Wits *wt, int ms, int ll, struct st result[1])
 {
 	struct st acc = {0, 0, 0, 0, 0, };
+
+	ASET(wt->agrSets, 0, wt->nSites);
 
 	for (int rr = 0; rr < wt->nSites; rr++) {
 		char msRdg = wt->rdgs[ms][rr];
@@ -154,34 +167,43 @@ double
 		// Handle Type-O agreements
 		if (msRdg == msRdg) {
 			acc.totO++;
-			if (msRdg == llRdg)
+			if (msRdg == llRdg) {
 				acc.agrO++;
+				wt->agrSets[rr] |= _O;
+			}
 		}
 
 		// Handle Type-A agreements
 		if (msRdg != rdgA) {
 			acc.totA++;
-			if (msRdg == llRdg)
+			if (msRdg == llRdg) {
 				acc.agrA++;
+				wt->agrSets[rr] |= _A;
+			}
 		}
 
 		// Handle Type-B agreements
 		if (msRdg != rdgB) {
 			acc.totB++;
-			if (msRdg == llRdg)
+			if (msRdg == llRdg) {
 				acc.agrB++;
+				wt->agrSets[rr] |= _B;
+			}
 		}
 
 		// Handle Type-AB agreements
 		if (msRdg != rdgA && msRdg != rdgB) {
 			acc.totAB++;
-			if (msRdg == llRdg)
+			if (msRdg == llRdg) {
 				acc.agrAB++;
+				wt->agrSets[rr] |= _AB;
+			}
 		}
 	}
 
-	*result = acc;
-	return RATE(result->agrO, result->totO);
+	if (result)
+		*result = acc;
+	return RATE(acc.agrO, acc.totO);
 }
 
 int
@@ -217,8 +239,7 @@ void
 		dist[ms][ms] = 0.0;
 
 		for (int ll = 0; ll < ms; ll++) {
-			struct st results[1];
-			double rate = wtSim(wt, ms, ll, results);
+			double rate = wtSim(wt, ms, ll, (struct st *) 0);
 			dist[ms][ll] = dist[ll][ms] = 1.0 - rate;
 		}
 	}
@@ -331,6 +352,97 @@ double
 }
 
 int
+	agrPrint(Wits *wt, int mask, const char *ms1name, const char *ms2name)
+{
+	
+	const int ms1 = wtFind(wt, ms1name);
+	if (ms1 == ERR) {
+		fprintf(stderr, "%s not found\n", (ms1name) ? ms2name : "[NULL]");
+		return ERR;
+	}
+
+	const int ms2 = wtFind(wt, ms2name);
+	if (ms2 == ERR) {
+		fprintf(stderr, "%s not found\n", (ms2name) ? ms2name : "[NULL]");
+		return ERR;
+	}
+		
+	// Find site agreements (saved in wt->agrSets[]).
+	(void) wtSim(wt, ms1, ms2, (struct st *) 0);
+
+	// Ready the VARS file: if input is not redirected try SOLN.VARS
+	FILE *fpin = stdin;
+	if (isatty(0)) {
+		fpin = fopen("SOLN.VARS", "r");
+		if (!fpin) {
+			fprintf(stderr, "Cannot find SOLN.VARS. If your has another name, pipe or redirect it in with <FILE-NAME.\n");
+			return ERR;
+		}
+	}
+
+	// Print variants when the mask hits.
+	{
+		static char inbuf[8182];
+
+		static char verse[512];
+		static char lemma[512];
+		static char vrdgs[512];
+
+		int nuverse = NO;
+		int nulemma = NO;
+		int found = NO;
+		int segno = 0;
+
+		while (fgets(inbuf, sizeof inbuf, fpin)) {
+			switch (inbuf[0]) {
+			case '@':
+				strncpy(verse, inbuf, sizeof verse);
+				nuverse = YES;
+				break;
+			case '>':
+				strncpy(lemma, inbuf+6, sizeof lemma);
+				nulemma = YES;
+				break;
+			case '^':
+				if (found) {
+					if (wt->rdgs[ms1][segno] == '0')
+						fprintf(stdout, "0  %s %s rell.\n", ms1name, ms2name);
+					fputs("\n", stdout);
+				}
+				segno = atoi(inbuf+1);
+				found = (wt->agrSets[segno] & mask);
+				if (found) {
+					if (nuverse) {
+						fputs(verse, stdout);
+						nuverse = NO;
+					}
+					if (nulemma) {
+						fputs(lemma, stdout);
+						nulemma = NO;
+					}
+					fputs(inbuf+1, stdout);
+				}
+				break;
+			case '=':
+				if (found)
+					fputs(inbuf+1, stdout);
+				break;
+			case '\n':
+				if (found) {
+					// Explicitly print agreements in 0
+					if (wt->rdgs[ms1][segno] == '0')
+						fprintf(stdout, "0  %s %s rell.\n", ms1name, ms2name);
+					fputs(inbuf, stdout);
+				}
+				found = NO;
+				break;
+			}
+		}
+	}
+	return OK;
+}
+
+int
 	main(int argc, const char *argv[])
 {
 	int ll;
@@ -402,6 +514,30 @@ int
 			}
 		}
 		return OK;
+	} else if (strcmp(msName, "-O") == 0) {
+		if (argc < 4) {
+			fprintf(stderr, "Usage: %s <mss>.tx -O <ms-name1> <ms-name2>\n", argv[0]);
+			return ERR;
+		}
+		return agrPrint(wt, _O, argv[3], argv[4]);
+	} else if (strcmp(msName, "-A") == 0) {
+		if (argc < 4) {
+			fprintf(stderr, "Usage: %s <mss>.tx -A <ms-name1> <ms-name2>\n", argv[0]);
+			return ERR;
+		}
+		return agrPrint(wt, _A, argv[3], argv[4]);
+	} else if (strcmp(msName, "-B") == 0) {
+		if (argc < 4) {
+			fprintf(stderr, "Usage: %s <mss>.tx -B <ms-name1> <ms-name2>\n", argv[0]);
+			return ERR;
+		}
+		return agrPrint(wt, _B, argv[3], argv[4]);
+	} else if (strcmp(msName, "-AB") == 0) {
+		if (argc < 4) {
+			fprintf(stderr, "Usage: %s <mss>.tx -AB <ms-name1> <ms-name2>\n", argv[0]);
+			return ERR;
+		}
+		return agrPrint(wt, _AB, argv[3], argv[4]);
 	} else {
 		fprintf(stderr, "%s not found in %s\n", msName, mss_tx);
 		return ERR;
